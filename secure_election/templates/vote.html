@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Vote</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body class="bg-light">
+
+<div class="container mt-5">
+  <h3 class="text-center">Cast Your Vote</h3>
+
+  {% if error %}
+    <div class="alert alert-danger">{{ error }}</div>
+  {% endif %}
+  
+  {% if success %}
+    <div class="alert alert-success">{{ success }}</div>
+  {% endif %}
+
+  <form method="post">
+    {% csrf_token %}
+    <div class="row mt-3">
+      {% for candidate in candidates %}
+        <div class="col-md-4 mb-3">
+          <div class="card shadow text-center p-3">
+            <img src="{{ candidate.photo.url }}" class="img-fluid" style="height:150px;">
+            <h5 class="mt-2">{{ candidate.name }}</h5>
+            <p>{{ candidate.party }}</p>
+            <input type="radio" name="candidate" value="{{ candidate.id }}" required>
+          </div>
+        </div>
+      {% endfor %}
+    </div>
+    <div class="d-grid">
+      <button type="submit" class="btn btn-success mt-3">Submit Vote</button>
+    </div>
+  </form>
+</div>
+
+</body>
+</html>
