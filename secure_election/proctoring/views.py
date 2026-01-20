@@ -12,7 +12,10 @@ from django.contrib.auth.decorators import login_required
 
 @login_required
 def face_register(request):
-    voter = Voter.objects.get(user=request.user)
+    try:
+        voter = Voter.objects.get(user=request.user)
+    except Voter.DoesNotExist:
+        return redirect('/voter-login/')
 
     if request.method == "POST":
         image_data = request.POST.get('image')
@@ -25,8 +28,10 @@ def face_register(request):
             )
             voter.save()
 
-    return render(request, 'face_register.html')
+            # ✅ REDIRECT AFTER SUCCESS
+            return redirect('/face-auth/')
 
+    return render(request, 'face_register.html')
 
 
 
