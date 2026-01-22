@@ -1,78 +1,137 @@
 import base64
-from django.core.files.base import ContentFile
-from django.shortcuts import render
-from django.contrib.auth.decorators import login_required
-from users.models import Voter
+import os
 
 import face_recognition
-import numpy as np
-from users.models import Voter
 from django.contrib.auth.decorators import login_required
+from django.core.files.base import ContentFile
+from django.shortcuts import render, redirect
+
+from users.models import Voter
 
 
-@login_required
+# =========================================================
+# FACE REGISTRATION (ONE-TIME ONLY)
+# =========================================================
+@login_required(login_url='/voter-login/')
 def face_register(request):
+    """
+    Allows a voter to register face exactly once.
+    Requires voter login.
+    """
+
     try:
         voter = Voter.objects.get(user=request.user)
     except Voter.DoesNotExist:
         return redirect('/voter-login/')
 
+    # ❌ Block re-registration
+    if voter.face_image:
+        return render(request, 'message.html', {
+            'msg': 'Face already registered. You can proceed to voting.'
+        })
+
     if request.method == "POST":
         image_data = request.POST.get('image')
 
-        if image_data:
-            format, imgstr = image_data.split(';base64,')
-            voter.face_image.save(
-                f"{voter.voter_id}.png",
-                ContentFile(base64.b64decode(imgstr))
+        if not image_data:
+            return render(request, 'face_register.html', {
+                'error': 'No image captured. Please try again.'
+            })
+
+        try:
+            header, encoded = image_data.split(';base64,')
+            image_file = ContentFile(
+                base64.b64decode(encoded),
+                name=f"{voter.voter_id}.png"
             )
+
+            voter.face_image.save(f"{voter.voter_id}.png", image_file)
             voter.save()
 
-            # ✅ REDIRECT AFTER SUCCESS
-            return redirect('/face-auth/')
+            return render(request, 'message.html', {
+                'msg': 'Face registration successful. You can now vote.'
+            })
+
+        except Exception:
+            return render(request, 'face_register.html', {
+                'error': 'Face registration failed. Please retry.'
+            })
 
     return render(request, 'face_register.html')
 
 
-
-
-@login_required
+# =========================================================
+# FACE AUTHENTICATION (BEFORE VOTING)
+# =========================================================
+@login_required(login_url='/voter-login/')
 def face_authenticate(request):
-    voter = Voter.objects.get(user=request.user)
+    """
+    Authenticates voter using live face capture.
+    Redirects to voting on success.
+    """
+
+    try:
+        voter = Voter.objects.get(user=request.user)
+    except Voter.DoesNotExist:
+        return redirect('/voter-login/')
+
+    # ❌ Cannot authenticate without face registration
+    if not voter.face_image:
+        return render(request, 'message.html', {
+            'msg': 'Face not registered. Please register your face first.'
+        })
 
     if request.method == "POST":
         image_data = request.POST.get('image')
 
-        if not voter.face_image:
+        if not image_data:
             return render(request, 'face_auth.html', {
-                'error': 'No registered face found'
+                'error': 'No image captured. Try again.'
             })
 
-        # Decode live image
-        format, imgstr = image_data.split(';base64,')
-        img_bytes = base64.b64decode(imgstr)
+        temp_path = "temp_live_face.png"
 
-        with open('temp.png', 'wb') as f:
-            f.write(img_bytes)
+        try:
+            # Decode live image
+            header, encoded = image_data.split(';base64,')
+            with open(temp_path, "wb") as f:
+                f.write(base64.b64decode(encoded))
 
-        # Load images
-        registered_image = face_recognition.load_image_file(voter.face_image.path)
-        live_image = face_recognition.load_image_file('temp.png')
+            # Load images
+            registered_img = face_recognition.load_image_file(voter.face_image.path)
+            live_img = face_recognition.load_image_file(temp_path)
 
-        reg_enc = face_recognition.face_encodings(registered_image)
-        live_enc = face_recognition.face_encodings(live_image)
+            registered_enc = face_recognition.face_encodings(registered_img)
+            live_enc = face_recognition.face_encodings(live_img)
 
-        if reg_enc and live_enc:
+            # Cleanup
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+
+            if not registered_enc or not live_enc:
+                return render(request, 'face_auth.html', {
+                    'error': 'Face not detected properly. Try again.'
+                })
+
             match = face_recognition.compare_faces(
-                [reg_enc[0]], live_enc[0]
+                [registered_enc[0]],
+                live_enc[0],
+                tolerance=0.5
             )
 
             if match[0]:
                 request.session['face_verified'] = True
                 return redirect('/vote/')
+            else:
+                return render(request, 'face_auth.html', {
+                    'error': 'Face authentication failed.'
+                })
 
-        return render(request, 'face_auth.html', {
-            'error': 'Face not matched'
-        })
+        except Exception:
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+            return render(request, 'face_auth.html', {
+                'error': 'Authentication error. Please retry.'
+            })
 
     return render(request, 'face_auth.html')

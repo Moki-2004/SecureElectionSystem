@@ -3,69 +3,54 @@
 <head>
   <title>Face Registration</title>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
-</head>
+<style>
+  .camera-box {
+    display: flex;
+    justify-content: center;
+    margin-top: 15px;
+  }
 
+  video {
+    width: 320px;       /* 🔥 adjust if needed */
+    height: 240px;
+    border-radius: 10px;
+    border: 2px solid #333;
+    background: black;
+  }
+</style>
+</head>
 <body class="bg-light">
 
 <div class="container mt-5">
-  <div class="row justify-content-center">
-    <div class="col-md-6">
-      <div class="card shadow p-4 text-center">
-        <h3>Face Registration</h3>
-        <p class="text-muted">Allow camera and capture face</p>
+  <div class="card shadow p-4 text-center">
+    <h3>Face Registration</h3>
+    <p class="text-muted">One-time face enrollment</p>
 
-        <video id="video" width="100%" autoplay playsinline></video>
-        <canvas id="canvas" style="display:none;"></canvas>
+        <div class="camera-box">
+            <video id="video" autoplay muted></video>
+        </div>
+    <canvas id="canvas" style="display:none;"></canvas>
 
-        <form id="faceForm" method="post">
-          {% csrf_token %}
-          <input type="hidden" name="image" id="imageData">
+    <form method="post">
+      {% csrf_token %}
+      <input type="hidden" name="image" id="imageData">
 
-          <button type="button" class="btn btn-primary mt-3" onclick="captureImage()">
-            Capture Image
-          </button>
-
-          <button type="submit" class="btn btn-success mt-3">
-            Save Face
-          </button>
-        </form>
-
-        <div id="msg" class="text-success mt-3"></div>
-
-      </div>
-    </div>
+      <button type="button" class="btn btn-primary mt-3" onclick="capture()">Capture Face</button>
+      <button type="submit" class="btn btn-success mt-3">Save Face</button>
+    </form>
   </div>
 </div>
 
 <script>
-const video = document.getElementById("video");
-const canvas = document.getElementById("canvas");
-const imageInput = document.getElementById("imageData");
-const msg = document.getElementById("msg");
-
-// Start camera
 navigator.mediaDevices.getUserMedia({ video: true })
-  .then(stream => {
-    video.srcObject = stream;
-  })
-  .catch(err => {
-    alert("Camera access denied or not available");
-  });
+.then(stream => video.srcObject = stream);
 
-function captureImage() {
-  if (video.videoWidth === 0) {
-    alert("Camera not ready yet");
-    return;
-  }
-
+function capture(){
   canvas.width = video.videoWidth;
   canvas.height = video.videoHeight;
-
-  const context = canvas.getContext("2d");
-  context.drawImage(video, 0, 0);
-
-  imageInput.value = canvas.toDataURL("image/png");
-  msg.innerText = "Image captured successfully ✔";
+  canvas.getContext("2d").drawImage(video,0,0);
+  document.getElementById("imageData").value =
+      canvas.toDataURL("image/png");
 }
 </script>
 
