@@ -85,6 +85,7 @@ def vote_page(request):
         except Candidate.DoesNotExist:
             return render(request, 'vote.html', {
                 'candidates': candidates,
+                'vote_time_limit': election.vote_time_limit,
                 'error': 'Invalid candidate selected.'
             })
 

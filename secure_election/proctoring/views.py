@@ -135,3 +135,51 @@ def face_authenticate(request):
             })
 
     return render(request, 'face_auth.html')
+
+ #Backend: Proctoring API (Event Receiver)
+
+from django.http import JsonResponse
+from django.views.decorators.csrf import csrf_exempt
+from django.utils.timezone import now
+from .models import ProctoringLog, ProctoringRule
+
+@csrf_exempt
+def log_violation(request):
+    if not request.user.is_authenticated:
+        return JsonResponse({"status": "unauthorized"})
+
+    voter = Voter.objects.get(user=request.user)
+    violation = request.POST.get("type")
+
+    rule = ProctoringRule.objects.first()
+    max_warnings = rule.max_warnings if rule else 2
+
+    # Count previous warnings
+    warning_count = ProctoringLog.objects.filter(
+        voter=voter,
+        violation_type=violation,
+        blocked=False
+    ).count()
+
+    log = ProctoringLog.objects.create(
+        voter=voter,
+        violation_type=violation
+    )
+
+    # 🚨 Immediate block conditions
+    if violation in ['FACE_CHANGED', 'MULTIPLE_FACES']:
+        log.blocked = True
+        log.save()
+        return JsonResponse({"action": "BLOCK"})
+
+    # ⚠ Progressive enforcement
+    if warning_count < max_warnings:
+        return JsonResponse({
+            "action": "WARN",
+            "remaining": max_warnings - warning_count
+        })
+    else:
+        log.blocked = True
+        log.save()
+        return JsonResponse({"action": "BLOCK"})
+
