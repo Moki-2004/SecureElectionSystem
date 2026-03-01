@@ -1,0 +1,9 @@
+{% extends "admin/change_list.html" %}
+
+{% block content %}
+    {{ block.super }}
+
+    <div style="margin-top:30px;padding:20px;background:#f8f9fa;border-radius:10px">
+        {{ decrypted_results|safe }}
+    </div>
+{% endblock %}

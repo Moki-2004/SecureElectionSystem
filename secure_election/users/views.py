@@ -1,5 +1,6 @@
 from django.shortcuts import render, redirect
-from django.contrib.auth import authenticate, login
+from django.contrib.auth import authenticate, login, logout
+
 
 def voter_login(request):
     if request.method == "POST":
@@ -8,15 +9,17 @@ def voter_login(request):
 
         user = authenticate(request, username=username, password=password)
 
-        if user and not user.is_staff:
+        if user is not None:
             login(request, user)
+            return redirect('/vote-entry/')
+        else:
+            return render(request, "voter_login.html", {
+                "error": "Invalid username or password"
+            })
 
-            # Redirect based on intent
-            next_url = request.GET.get('next')
-            return redirect(next_url if next_url else '/')
+    return render(request, "voter_login.html")
 
-        return render(request, 'voter_login.html', {
-            'error': 'Invalid credentials'
-        })
 
-    return render(request, 'voter_login.html')
+def voter_logout(request):
+    logout(request)
+    return redirect('/')
