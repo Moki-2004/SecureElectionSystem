@@ -1,30 +1,30 @@
 import base64
 import os
+import tempfile
 
 import face_recognition
 from django.contrib.auth.decorators import login_required
 from django.core.files.base import ContentFile
-from django.shortcuts import render, redirect
+from django.http import JsonResponse
+from django.shortcuts import redirect, render
+from django.views.decorators.http import require_POST
 
 from users.models import Voter
 
+from .models import ProctoringLog, ProctoringRule
 
-# =========================================================
-# FACE REGISTRATION (ONE-TIME ONLY)
-# =========================================================
+
 @login_required(login_url='/voter-login/')
 def face_register(request):
     """
     Allows a voter to register face exactly once.
     Requires voter login.
     """
-
     try:
         voter = Voter.objects.get(user=request.user)
     except Voter.DoesNotExist:
         return redirect('/voter-login/')
 
-    # ❌ Block re-registration
     if voter.face_image:
         return render(request, 'message.html', {
             'msg': 'Face already registered. You can proceed to voting.'
@@ -39,19 +39,18 @@ def face_register(request):
             })
 
         try:
-            header, encoded = image_data.split(';base64,')
+            _, encoded = image_data.split(';base64,')
             image_file = ContentFile(
                 base64.b64decode(encoded),
                 name=f"{voter.voter_id}.png"
             )
 
             voter.face_image.save(f"{voter.voter_id}.png", image_file)
-            voter.save()
+            voter.save(update_fields=['face_image'])
 
             return render(request, 'message.html', {
                 'msg': 'Face registration successful. You can now vote.'
             })
-
         except Exception:
             return render(request, 'face_register.html', {
                 'error': 'Face registration failed. Please retry.'
@@ -60,22 +59,17 @@ def face_register(request):
     return render(request, 'face_register.html')
 
 
-# =========================================================
-# FACE AUTHENTICATION (BEFORE VOTING)
-# =========================================================
 @login_required(login_url='/voter-login/')
 def face_authenticate(request):
     """
     Authenticates voter using live face capture.
     Redirects to voting on success.
     """
-
     try:
         voter = Voter.objects.get(user=request.user)
     except Voter.DoesNotExist:
         return redirect('/voter-login/')
 
-    # ❌ Cannot authenticate without face registration
     if not voter.face_image:
         return render(request, 'message.html', {
             'msg': 'Face not registered. Please register your face first.'
@@ -89,24 +83,19 @@ def face_authenticate(request):
                 'error': 'No image captured. Try again.'
             })
 
-        temp_path = "temp_live_face.png"
+        temp_path = None
 
         try:
-            # Decode live image
-            header, encoded = image_data.split(';base64,')
-            with open(temp_path, "wb") as f:
-                f.write(base64.b64decode(encoded))
+            _, encoded = image_data.split(';base64,')
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.png') as temp_file:
+                temp_file.write(base64.b64decode(encoded))
+                temp_path = temp_file.name
 
-            # Load images
             registered_img = face_recognition.load_image_file(voter.face_image.path)
             live_img = face_recognition.load_image_file(temp_path)
 
             registered_enc = face_recognition.face_encodings(registered_img)
             live_enc = face_recognition.face_encodings(live_img)
-
-            # Cleanup
-            if os.path.exists(temp_path):
-                os.remove(temp_path)
 
             if not registered_enc or not live_enc:
                 return render(request, 'face_auth.html', {
@@ -122,42 +111,41 @@ def face_authenticate(request):
             if match[0]:
                 request.session['face_verified'] = True
                 return redirect('/vote/')
-            else:
-                return render(request, 'face_auth.html', {
-                    'error': 'Face authentication failed.'
-                })
+
+            return render(request, 'face_auth.html', {
+                'error': 'Face authentication failed.'
+            })
 
         except Exception:
-            if os.path.exists(temp_path):
-                os.remove(temp_path)
             return render(request, 'face_auth.html', {
                 'error': 'Authentication error. Please retry.'
             })
+        finally:
+            if temp_path and os.path.exists(temp_path):
+                os.remove(temp_path)
 
     return render(request, 'face_auth.html')
 
- #Backend: Proctoring API (Event Receiver)
 
-from django.http import JsonResponse
-from django.views.decorators.csrf import csrf_exempt
-from django.utils.timezone import now
-from .models import ProctoringLog, ProctoringRule
-
-@csrf_exempt
+@login_required(login_url='/voter-login/')
+@require_POST
 def log_violation(request):
-    if not request.user.is_authenticated:
-        return JsonResponse({"status": "unauthorized"})
+    try:
+        voter = Voter.objects.get(user=request.user)
+    except Voter.DoesNotExist:
+        return JsonResponse({'status': 'unauthorized'}, status=401)
 
-    voter = Voter.objects.get(user=request.user)
-    violation = request.POST.get("type")
+    violation = (request.POST.get('type') or '').strip().upper()
+    valid_types = {choice[0] for choice in ProctoringLog.VIOLATION_TYPES}
+
+    if violation not in valid_types:
+        return JsonResponse({'status': 'invalid violation type'}, status=400)
 
     rule = ProctoringRule.objects.first()
     max_warnings = rule.max_warnings if rule else 2
 
-    # Count previous warnings
     warning_count = ProctoringLog.objects.filter(
         voter=voter,
-        violation_type=violation,
         blocked=False
     ).count()
 
@@ -166,20 +154,17 @@ def log_violation(request):
         violation_type=violation
     )
 
-    # 🚨 Immediate block conditions
-    if violation in ['FACE_CHANGED', 'MULTIPLE_FACES']:
+    if violation in {'FACE_CHANGED', 'MULTIPLE_FACES'}:
         log.blocked = True
-        log.save()
-        return JsonResponse({"action": "BLOCK"})
+        log.save(update_fields=['blocked'])
+        return JsonResponse({'action': 'BLOCK'})
 
-    # ⚠ Progressive enforcement
     if warning_count < max_warnings:
         return JsonResponse({
-            "action": "WARN",
-            "remaining": max_warnings - warning_count
+            'action': 'WARN',
+            'remaining': max_warnings - warning_count
         })
-    else:
-        log.blocked = True
-        log.save()
-        return JsonResponse({"action": "BLOCK"})
 
+    log.blocked = True
+    log.save(update_fields=['blocked'])
+    return JsonResponse({'action': 'BLOCK'})

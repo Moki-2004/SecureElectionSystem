@@ -1,0 +1,13 @@
+# Secrets
+.env
+
+# Python cache
+__pycache__/
+*.py[cod]
+
+# Local DB/media
+db.sqlite3
+media/
+
+# IDE
+.idea/

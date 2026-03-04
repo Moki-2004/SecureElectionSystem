@@ -1,3 +1,4 @@
+{% load static %}
 <!DOCTYPE html>
 <html>
 <head>
@@ -13,18 +14,19 @@
   {% if error %}
     <div class="alert alert-danger">{{ error }}</div>
   {% endif %}
-  
+
   {% if success %}
     <div class="alert alert-success">{{ success }}</div>
   {% endif %}
 
-  <form method="post">
+  <form method="post" id="voteForm">
     {% csrf_token %}
+
     <div class="row mt-3">
       {% for candidate in candidates %}
         <div class="col-md-4 mb-3">
           <div class="card shadow text-center p-3">
-            <img src="{{ candidate.photo.url }}" class="img-fluid" style="height:150px;">
+            <img src="{{ candidate.photo.url }}" class="img-fluid" style="height:150px; object-fit: cover;">
             <h5 class="mt-2">{{ candidate.name }}</h5>
             <p>{{ candidate.party }}</p>
             <input type="radio" name="candidate" value="{{ candidate.id }}" required>
@@ -32,110 +34,124 @@
         </div>
       {% endfor %}
     </div>
+
     <div class="d-grid">
       <button type="submit" class="btn btn-success mt-3">Submit Vote</button>
     </div>
-                   <div class="card shadow mt-4">
-                    <div class="card-header bg-dark text-white">
-                      🛡 Intelligent Proctoring
-                    </div>
-
-                    <div class="card-body">
-                      <div class="row">
-                        <div class="col-md-4 text-center">
-                          <video id="proctorVideo" autoplay muted class="border rounded w-100"></video>
-                        </div>
-
-                        <div class="col-md-8">
-                          <div id="proctorStatus" class="alert alert-info">
-                            Proctoring active. Keep your face visible.
-                          </div>
-
-                          <div id="timer" class="alert alert-warning">
-                            ⏳ Time Remaining: <span id="timeLeft">60</span> seconds
-                          </div>
-                        </div>
-                      </div>
-                    </div>
   </form>
-</div>
-<script>
-document.addEventListener("DOMContentLoaded", function () {
 
+  <div class="card shadow mt-4">
+    <div class="card-header bg-dark text-white">Intelligent Proctoring</div>
+    <div class="card-body">
+      <div class="row">
+        <div class="col-md-4 text-center">
+          <video id="proctorVideo" autoplay muted class="border rounded w-100"></video>
+        </div>
+        <div class="col-md-8">
+          <div id="proctorStatus" class="alert alert-info">
+            Proctoring active. Keep your face visible.
+          </div>
+          <div id="timer" class="alert alert-warning">
+            Time Remaining: <span id="timeLeft">{{ vote_time_limit }}</span> seconds
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+document.addEventListener("DOMContentLoaded", async function () {
     const video = document.getElementById("proctorVideo");
-    const warningBox = document.getElementById("proctor-warning");
-    const timerBox = document.getElementById("proctor-timer");
+    const statusBox = document.getElementById("proctorStatus");
+    const timeLeft = document.getElementById("timeLeft");
+    const csrfInput = document.querySelector("input[name='csrfmiddlewaretoken']");
+    const csrfToken = csrfInput ? csrfInput.value : "";
 
     let startTime = Date.now();
-    let maxTime = {{ vote_time_limit}};
-    let warningCount = 0;
+    let maxTime = Number("{{ vote_time_limit|default:120 }}");
 
-    // START CAMERA
-    navigator.mediaDevices.getUserMedia({ video: true })
-    .then(stream => {
-        video.srcObject = stream;
-        console.log("Camera started");
-    })
-    .catch(err => {
-        console.error("Camera error", err);
-        triggerViolation("CAMERA_OFF");
-    });
+    function setStatus(message, level) {
+        statusBox.className = "alert alert-" + level;
+        statusBox.textContent = message;
+    }
 
-    // TIMER
-    setInterval(() => {
-        let elapsed = Math.floor((Date.now() - startTime) / 1000);
-        let remaining = maxTime - elapsed;
+    async function triggerViolation(type) {
+        try {
+            const res = await fetch("/log-violation/", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/x-www-form-urlencoded",
+                    "X-CSRFToken": csrfToken
+                },
+                body: new URLSearchParams({ type })
+            });
+            const data = await res.json();
 
-        timerBox.innerHTML =
-          `⏱ Time Remaining: <b>${remaining}</b> seconds`;
-
-        if (remaining <= maxTime * 0.2 && remaining > 0) {
-            showWarning("⏰ Time is about to expire");
+            if (data.action === "WARN") {
+                setStatus("Warning: " + type.replace("_", " "), "warning");
+            } else if (data.action === "BLOCK") {
+                alert("Voting blocked due to proctoring violations.");
+                window.location.href = "/";
+            }
+        } catch (err) {
+            setStatus("Proctoring sync error. Check network/camera.", "danger");
         }
+    }
 
-        if (remaining <= 0) {
-            triggerViolation("TIME_EXCEEDED");
+    try {
+        const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+        video.srcObject = stream;
+    } catch (err) {
+        await triggerViolation("CAMERA_OFF");
+        return;
+    }
+
+    try {
+        await Promise.all([
+            faceapi.nets.tinyFaceDetector.loadFromUri("{% static 'models' %}"),
+            faceapi.nets.faceLandmark68Net.loadFromUri("{% static 'models' %}"),
+            faceapi.nets.faceRecognitionNet.loadFromUri("{% static 'models' %}")
+        ]);
+    } catch (err) {
+        setStatus("Proctoring model load failed.", "danger");
+    }
+
+    setInterval(async () => {
+        const elapsed = Math.floor((Date.now() - startTime) / 1000);
+        const remaining = Math.max(0, maxTime - elapsed);
+        timeLeft.textContent = String(remaining);
+
+        if (remaining === 0) {
+            await triggerViolation("TIME_EXCEEDED");
         }
     }, 1000);
 
-    // FACE PRESENCE CHECK
-    setInterval(() => {
-        if (video.videoWidth === 0 || video.videoHeight === 0) {
-            triggerViolation("NO_FACE");
+    setInterval(async () => {
+        if (!video.srcObject || video.videoWidth === 0) {
+            await triggerViolation("CAMERA_OFF");
+            return;
+        }
+
+        try {
+            const detections = await faceapi.detectAllFaces(
+                video,
+                new faceapi.TinyFaceDetectorOptions()
+            );
+
+            if (!detections || detections.length === 0) {
+                await triggerViolation("NO_FACE");
+            } else if (detections.length > 1) {
+                await triggerViolation("MULTIPLE_FACES");
+            } else {
+                setStatus("Proctoring active. Face detected.", "success");
+            }
+        } catch (err) {
+            await triggerViolation("CAMERA_OFF");
         }
     }, 3000);
-
-    function showWarning(msg) {
-        warningBox.classList.remove("d-none");
-        warningBox.innerHTML = msg;
-    }
-
-    function triggerViolation(type) {
-        fetch("/log-violation/", {
-            method: "POST",
-            headers: {
-                "X-CSRFToken": "{{ csrf_token }}"
-            },
-            body: new URLSearchParams({ type })
-        })
-        .then(res => res.json())
-        .then(data => {
-            if (data.action === "WARN") {
-                warningCount++;
-                showWarning(
-                  `⚠ Warning ${warningCount}: ${type.replace("_"," ")}`
-                );
-            }
-            if (data.action === "BLOCK") {
-                alert("❌ Voting blocked due to violations");
-                window.location.href = "/";
-            }
-        });
-    }
-
 });
 </script>
-
 
 </body>
 </html>

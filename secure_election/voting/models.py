@@ -5,6 +5,7 @@ from elections.models import Candidate
 class Vote(models.Model):
     voter = models.OneToOneField(Voter, on_delete=models.CASCADE)
     candidate = models.ForeignKey(Candidate, on_delete=models.CASCADE)
+    encrypted_candidate = models.TextField(blank=True, default="")
     timestamp = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):

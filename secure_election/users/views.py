@@ -1,5 +1,5 @@
 from django.shortcuts import render, redirect
-from django.contrib.auth import authenticate, login
+from django.contrib.auth import authenticate, login, logout
 
 def voter_login(request):
     if request.method == "POST":
@@ -20,3 +20,7 @@ def voter_login(request):
         })
 
     return render(request, 'voter_login.html')
+
+def voter_logout(request):
+    logout(request)
+    return redirect('/')
