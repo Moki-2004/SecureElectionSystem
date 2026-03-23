@@ -1,65 +1,91 @@
+{% extends "base.html" %}
 {% load static %}
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Vote</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
-    <script defer src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
-</head>
-<body class="bg-light">
 
-<div class="container mt-5">
-  <h3 class="text-center">Cast Your Vote</h3>
+{% block title %}Cast Vote{% endblock %}
 
-  {% if error %}
-    <div class="alert alert-danger">{{ error }}</div>
-  {% endif %}
+{% block extra_head %}
+<script defer src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
+{% endblock %}
 
-  {% if success %}
-    <div class="alert alert-success">{{ success }}</div>
-  {% endif %}
+{% block content %}
+<section class="hero-panel mb-4">
+    <span class="eyebrow">Secure Voting Session</span>
+    <h1 class="page-title">Cast your vote with live monitoring enabled.</h1>
+    <p class="page-subtitle">Select one candidate, review your choice, and submit before the timer expires. Camera-based proctoring remains active until the ballot is submitted.</p>
+    <div class="info-strip">
+        <span class="info-chip">Time limit: {{ vote_time_limit }} seconds</span>
+        <span class="info-chip">One vote per voter</span>
+        <span class="info-chip">Proctoring active</span>
+    </div>
+</section>
 
-  <form method="post" id="voteForm">
-    {% csrf_token %}
+<div class="row g-4">
+    <div class="col-xl-8">
+        <section class="content-panel">
+            <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-4">
+                <div>
+                    <h3 class="mb-1">Choose a candidate</h3>
+                    <p class="text-muted mb-0">Only one candidate can be selected.</p>
+                </div>
+            </div>
 
-    <div class="row mt-3">
-      {% for candidate in candidates %}
-        <div class="col-md-4 mb-3">
-          <div class="card shadow text-center p-3">
-            <img src="{{ candidate.photo.url }}" class="img-fluid" style="height:150px; object-fit: cover;">
-            <h5 class="mt-2">{{ candidate.name }}</h5>
-            <p>{{ candidate.party }}</p>
-            <input type="radio" name="candidate" value="{{ candidate.id }}" required>
-          </div>
-        </div>
-      {% endfor %}
+            {% if error %}
+                <div class="alert alert-danger soft-danger">{{ error }}</div>
+            {% endif %}
+
+            <form method="post" id="voteForm">
+                {% csrf_token %}
+                <div class="row g-4">
+                    {% for candidate in candidates %}
+                        <div class="col-md-6">
+                            <label class="candidate-option">
+                                <input type="radio" name="candidate" value="{{ candidate.id }}" required>
+                                <div class="candidate-card">
+                                    {% if candidate.photo %}
+                                        <img src="{{ candidate.photo.url }}" alt="{{ candidate.name }}" class="candidate-photo mb-3">
+                                    {% endif %}
+                                    <h4 class="mb-1">{{ candidate.name }}</h4>
+                                    <p class="text-muted mb-3">{{ candidate.party }}</p>
+                                    <span class="btn btn-outline-brand w-100">Select Candidate</span>
+                                </div>
+                            </label>
+                        </div>
+                    {% empty %}
+                        <div class="col-12">
+                            <div class="alert alert-secondary">No candidates are available for the active election.</div>
+                        </div>
+                    {% endfor %}
+                </div>
+
+                {% if candidates %}
+                    <div class="mt-4 pt-2">
+                        <button type="submit" class="btn btn-brand w-100">Submit Vote</button>
+                    </div>
+                {% endif %}
+            </form>
+        </section>
     </div>
 
-    <div class="d-grid">
-      <button type="submit" class="btn btn-success mt-3">Submit Vote</button>
-    </div>
-  </form>
+    <div class="col-xl-4">
+        <section class="media-panel mb-4">
+            <h3 class="mb-3">Live Proctoring</h3>
+            <video id="proctorVideo" autoplay muted playsinline class="camera-frame mb-3"></video>
+            <div id="proctorStatus" class="status-box">
+                Proctoring active. Keep your face visible.
+            </div>
+        </section>
 
-  <div class="card shadow mt-4">
-    <div class="card-header bg-dark text-white">Intelligent Proctoring</div>
-    <div class="card-body">
-      <div class="row">
-        <div class="col-md-4 text-center">
-          <video id="proctorVideo" autoplay muted class="border rounded w-100"></video>
-        </div>
-        <div class="col-md-8">
-          <div id="proctorStatus" class="alert alert-info">
-            Proctoring active. Keep your face visible.
-          </div>
-          <div id="timer" class="alert alert-warning">
-            Time Remaining: <span id="timeLeft">{{ vote_time_limit }}</span> seconds
-          </div>
-        </div>
-      </div>
+        <section class="content-panel">
+            <h3 class="mb-3">Voting Timer</h3>
+            <div id="timer" class="status-box">
+                Time remaining: <strong><span id="timeLeft">{{ vote_time_limit }}</span> seconds</strong>
+            </div>
+        </section>
     </div>
-  </div>
 </div>
+{% endblock %}
 
+{% block extra_js %}
 <script>
 document.addEventListener("DOMContentLoaded", async function () {
     const video = document.getElementById("proctorVideo");
@@ -68,15 +94,20 @@ document.addEventListener("DOMContentLoaded", async function () {
     const csrfInput = document.querySelector("input[name='csrfmiddlewaretoken']");
     const csrfToken = csrfInput ? csrfInput.value : "";
 
-    let startTime = Date.now();
-    let maxTime = Number("{{ vote_time_limit|default:120 }}");
+    const startTime = Date.now();
+    const maxTime = Number("{{ vote_time_limit|default:120 }}");
+    let blocked = false;
 
     function setStatus(message, level) {
-        statusBox.className = "alert alert-" + level;
-        statusBox.textContent = message;
+        statusBox.className = "status-box";
+        statusBox.innerHTML = "<strong>" + level + ":</strong> " + message;
     }
 
     async function triggerViolation(type) {
+        if (blocked) {
+            return;
+        }
+
         try {
             const res = await fetch("/log-violation/", {
                 method: "POST",
@@ -89,13 +120,14 @@ document.addEventListener("DOMContentLoaded", async function () {
             const data = await res.json();
 
             if (data.action === "WARN") {
-                setStatus("Warning: " + type.replace("_", " "), "warning");
+                setStatus(type.replace(/_/g, " ").toLowerCase(), "Warning");
             } else if (data.action === "BLOCK") {
+                blocked = true;
                 alert("Voting blocked due to proctoring violations.");
                 window.location.href = "/";
             }
         } catch (err) {
-            setStatus("Proctoring sync error. Check network/camera.", "danger");
+            setStatus("proctoring sync error. Check network or camera access.", "Error");
         }
     }
 
@@ -114,7 +146,7 @@ document.addEventListener("DOMContentLoaded", async function () {
             faceapi.nets.faceRecognitionNet.loadFromUri("{% static 'models' %}")
         ]);
     } catch (err) {
-        setStatus("Proctoring model load failed.", "danger");
+        setStatus("proctoring model load failed.", "Error");
     }
 
     setInterval(async () => {
@@ -128,6 +160,10 @@ document.addEventListener("DOMContentLoaded", async function () {
     }, 1000);
 
     setInterval(async () => {
+        if (blocked) {
+            return;
+        }
+
         if (!video.srcObject || video.videoWidth === 0) {
             await triggerViolation("CAMERA_OFF");
             return;
@@ -144,7 +180,7 @@ document.addEventListener("DOMContentLoaded", async function () {
             } else if (detections.length > 1) {
                 await triggerViolation("MULTIPLE_FACES");
             } else {
-                setStatus("Proctoring active. Face detected.", "success");
+                setStatus("face detected. You can continue voting.", "Active");
             }
         } catch (err) {
             await triggerViolation("CAMERA_OFF");
@@ -152,6 +188,4 @@ document.addEventListener("DOMContentLoaded", async function () {
     }, 3000);
 });
 </script>
-
-</body>
-</html>
+{% endblock %}

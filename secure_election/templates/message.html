@@ -1,4 +1,12 @@
-<div class="container mt-5 text-center">
-  <div class="alert alert-info">{{ msg }}</div>
-  <a href="/" class="btn btn-secondary">Go Home</a>
-</div>
+{% extends "base.html" %}
+
+{% block title %}Status{% endblock %}
+
+{% block content %}
+<section class="content-panel message-panel text-center">
+    <span class="eyebrow">System Message</span>
+    <h1 class="page-title fs-1">Status Update</h1>
+    <div class="alert alert-info mt-4 mb-4">{{ msg }}</div>
+    <a href="/" class="btn btn-outline-brand">Go Home</a>
+</section>
+{% endblock %}
