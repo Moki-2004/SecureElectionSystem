@@ -2,27 +2,206 @@
 
 {% block title %}Election Results{% endblock %}
 
+{% block extra_head %}
+<style>
+    .chart-panel {
+        margin-top: 24px;
+        padding: 24px;
+        border-radius: var(--radius-lg);
+        background: rgba(255, 255, 255, 0.72);
+        border: 1px solid rgba(16, 32, 51, 0.08);
+    }
+
+    .results-meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        margin-top: 20px;
+    }
+
+    .meta-card {
+        min-width: 160px;
+        padding: 16px 18px;
+        border-radius: var(--radius-md);
+        background: rgba(16, 32, 51, 0.05);
+        border: 1px solid rgba(16, 32, 51, 0.08);
+    }
+
+    .meta-label {
+        display: block;
+        color: var(--muted);
+        font-size: 0.85rem;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+    }
+
+    .meta-value {
+        display: block;
+        margin-top: 8px;
+        font-size: 1.6rem;
+        font-weight: 800;
+    }
+
+    .chart-stack {
+        display: grid;
+        gap: 18px;
+        margin-top: 24px;
+    }
+
+    .chart-row {
+        display: grid;
+        grid-template-columns: minmax(120px, 180px) minmax(0, 1fr) auto;
+        gap: 16px;
+        align-items: center;
+    }
+
+    .chart-label {
+        font-weight: 700;
+    }
+
+    .chart-track {
+        position: relative;
+        height: 44px;
+        overflow: hidden;
+        border-radius: 999px;
+        background: rgba(16, 32, 51, 0.08);
+    }
+
+    .chart-bar {
+        height: 100%;
+        min-width: 0;
+        border-radius: 999px;
+        background: linear-gradient(135deg, var(--primary), #1f8f76);
+        transition: width 0.45s ease;
+    }
+
+    .chart-value {
+        min-width: 86px;
+        text-align: right;
+        font-weight: 700;
+        color: var(--primary-dark);
+    }
+
+    .empty-state {
+        padding: 24px;
+        border-radius: var(--radius-md);
+        text-align: center;
+        color: var(--muted);
+        background: rgba(16, 32, 51, 0.04);
+        border: 1px dashed rgba(16, 32, 51, 0.12);
+    }
+
+    @media (max-width: 767.98px) {
+        .chart-row {
+            grid-template-columns: 1fr;
+            gap: 10px;
+        }
+
+        .chart-value {
+            text-align: left;
+        }
+    }
+</style>
+{% endblock %}
+
 {% block content %}
 <section class="content-panel">
     <span class="eyebrow">Public Results</span>
     <h1 class="page-title fs-1">Election Results</h1>
-    <p class="page-subtitle">Live decrypted totals are shown below based on recorded ballots.</p>
+    <p class="page-subtitle">Live decrypted totals are shown below based on recorded ballots. The chart refreshes automatically.</p>
 
-    {% if winner %}
-        <div class="alert alert-success soft-success mt-4">
-            Winner: <strong>{{ winner }}</strong>
+    <div class="results-meta">
+        <div class="meta-card">
+            <span class="meta-label">Total Votes</span>
+            <span class="meta-value" id="total-votes">{{ total_votes }}</span>
         </div>
-    {% endif %}
+        <div class="meta-card">
+            <span class="meta-label">Current Leader</span>
+            <span class="meta-value fs-4" id="winner-name">{{ winner|default:"No leader yet" }}</span>
+        </div>
+    </div>
 
-    <div class="d-grid gap-3 mt-4">
-        {% for name, count in results %}
-            <div class="result-row">
-                <strong>{{ name }}</strong>
-                <span class="metric-badge">{{ count }} vote{{ count|pluralize }}</span>
-            </div>
-        {% empty %}
-            <div class="alert alert-secondary">No results are available yet.</div>
-        {% endfor %}
+    <div class="chart-panel">
+        <div id="chart-container" class="chart-stack">
+            {% for item in results %}
+                <div class="chart-row">
+                    <div class="chart-label">{{ item.name }}</div>
+                    <div class="chart-track">
+                        <div class="chart-bar" style="width: {% if results.0.votes %}{% widthratio item.votes results.0.votes 100 %}{% else %}0{% endif %}%;"></div>
+                    </div>
+                    <div class="chart-value">{{ item.votes }} vote{{ item.votes|pluralize }}</div>
+                </div>
+            {% empty %}
+                <div class="empty-state">No results are available yet.</div>
+            {% endfor %}
+        </div>
     </div>
 </section>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    const chartContainer = document.getElementById('chart-container');
+    const totalVotesEl = document.getElementById('total-votes');
+    const winnerNameEl = document.getElementById('winner-name');
+    const dataUrl = '/results/data/';
+
+    function pluralizeVotes(count) {
+        return count === 1 ? 'vote' : 'votes';
+    }
+
+    function escapeHtml(value) {
+        return String(value)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+
+    function renderChart(payload) {
+        const results = payload.results || [];
+        totalVotesEl.textContent = payload.total_votes ?? 0;
+        winnerNameEl.textContent = payload.winner || 'No leader yet';
+
+        if (!results.length) {
+            chartContainer.innerHTML = '<div class="empty-state">No results are available yet.</div>';
+            return;
+        }
+
+        const maxVotes = Math.max(...results.map(item => item.votes), 1);
+        chartContainer.innerHTML = results.map(item => {
+            const width = (item.votes / maxVotes) * 100;
+            return `
+                <div class="chart-row">
+                    <div class="chart-label">${escapeHtml(item.name)}</div>
+                    <div class="chart-track">
+                        <div class="chart-bar" style="width: ${width}%;"></div>
+                    </div>
+                    <div class="chart-value">${item.votes} ${pluralizeVotes(item.votes)}</div>
+                </div>
+            `;
+        }).join('');
+    }
+
+    async function refreshResults() {
+        try {
+            const response = await fetch(dataUrl, {
+                headers: {
+                    'X-Requested-With': 'XMLHttpRequest'
+                }
+            });
+            if (!response.ok) {
+                throw new Error('Failed to load results');
+            }
+            const payload = await response.json();
+            renderChart(payload);
+        } catch (error) {
+            console.error(error);
+        }
+    }
+
+    refreshResults();
+    setInterval(refreshResults, 5000);
+</script>
 {% endblock %}

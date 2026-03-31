@@ -2,6 +2,7 @@ from collections import Counter
 
 from django.contrib.auth.decorators import login_required
 from django.db import transaction
+from django.http import JsonResponse
 from django.shortcuts import redirect, render
 from django.utils import timezone
 
@@ -10,6 +11,48 @@ from secure_election.utils.encryption import decrypt_vote, encrypt_vote
 from users.models import Voter
 
 from .models import Vote
+
+
+def build_results_summary():
+    votes = Vote.objects.select_related('candidate').all()
+    decrypted_ids = []
+
+    for vote in votes:
+        try:
+            if vote.encrypted_candidate:
+                cid = decrypt_vote(vote.encrypted_candidate)
+                decrypted_ids.append(int(cid))
+            elif vote.candidate_id:
+                decrypted_ids.append(vote.candidate_id)
+        except Exception:
+            continue
+
+    counts = Counter(decrypted_ids)
+    sorted_counts = sorted(counts.items(), key=lambda item: (-item[1], item[0]))
+
+    results = []
+    winner = None
+
+    if sorted_counts:
+        top_id = sorted_counts[0][0]
+        top_candidate = Candidate.objects.filter(id=top_id).first()
+        winner = top_candidate.name if top_candidate else None
+
+    for cid, total in sorted_counts:
+        candidate = Candidate.objects.filter(id=cid).first()
+        if candidate:
+            results.append({
+                'candidate_id': candidate.id,
+                'name': candidate.name,
+                'votes': total,
+            })
+
+    total_votes = sum(item['votes'] for item in results)
+    return {
+        'results': results,
+        'winner': winner,
+        'total_votes': total_votes,
+    }
 
 
 @login_required(login_url='/voter-login/')
@@ -116,35 +159,9 @@ def vote_page(request):
 
 
 def public_results(request):
-    votes = Vote.objects.all()
-    decrypted_ids = []
+    summary = build_results_summary()
+    return render(request, 'results.html', summary)
 
-    for vote in votes:
-        try:
-            if vote.encrypted_candidate:
-                cid = decrypt_vote(vote.encrypted_candidate)
-                decrypted_ids.append(int(cid))
-            elif vote.candidate_id:
-                decrypted_ids.append(vote.candidate_id)
-        except Exception:
-            continue
 
-    counts = Counter(decrypted_ids)
-
-    results = []
-    winner = None
-
-    if counts:
-        top_id = max(counts, key=counts.get)
-        top_candidate = Candidate.objects.filter(id=top_id).first()
-        winner = top_candidate.name if top_candidate else None
-
-    for cid, total in counts.items():
-        candidate = Candidate.objects.filter(id=cid).first()
-        if candidate:
-            results.append((candidate.name, total))
-
-    return render(request, 'results.html', {
-        'results': results,
-        'winner': winner
-    })
+def public_results_data(request):
+    return JsonResponse(build_results_summary())
