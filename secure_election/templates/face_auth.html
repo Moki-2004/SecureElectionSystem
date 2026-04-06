@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+
+{% block title %}Face Authentication{% endblock %}
+
+{% block content %}
+<div class="row g-4 align-items-stretch">
+    <div class="col-lg-5">
+        <section class="content-panel h-100">
+            <span class="eyebrow">Verification</span>
+            <h1 class="page-title fs-1">Face Authentication</h1>
+            <p class="page-subtitle">Verify identity before entering the ballot page. Look straight into the camera and keep your face fully visible.</p>
+            {% if error %}
+                <div class="alert alert-danger soft-danger mt-4">{{ error }}</div>
+            {% endif %}
+            <div class="info-strip">
+                <span class="info-chip">Single face only</span>
+                <span class="info-chip">Camera must stay on</span>
+                <span class="info-chip">Required before voting</span>
+            </div>
+        </section>
+    </div>
+    <div class="col-lg-7">
+        <section class="media-panel h-100 text-center">
+            <video id="video" class="camera-frame" autoplay muted playsinline></video>
+            <canvas id="canvas" style="display:none;"></canvas>
+
+            <form method="post" class="mt-4">
+                {% csrf_token %}
+                <input type="hidden" name="image" id="imageData">
+                <button type="button" onclick="capture()" class="btn btn-brand">Capture and Verify</button>
+            </form>
+        </section>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+const video = document.getElementById("video");
+
+navigator.mediaDevices.getUserMedia({ video: true })
+    .then(stream => {
+        video.srcObject = stream;
+    })
+    .catch(() => {
+        alert("Unable to access camera. Please allow camera permission and reload the page.");
+    });
+
+function capture() {
+    const canvas = document.getElementById("canvas");
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    canvas.getContext("2d").drawImage(video, 0, 0);
+    document.getElementById("imageData").value = canvas.toDataURL("image/png");
+    document.forms[0].submit();
+}
+</script>
+{% endblock %}

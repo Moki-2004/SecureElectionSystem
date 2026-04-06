@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+
+{% block title %}Face Registration{% endblock %}
+
+{% block content %}
+<div class="row g-4 align-items-stretch">
+    <div class="col-lg-5">
+        <section class="content-panel h-100">
+            <span class="eyebrow">Identity Setup</span>
+            <h1 class="page-title fs-1">Face Registration</h1>
+            <p class="page-subtitle">Capture a clear front-facing image in good lighting. This is stored for later identity verification during voting.</p>
+            {% if error %}
+                <div class="alert alert-danger soft-danger mt-4">{{ error }}</div>
+            {% endif %}
+            <div class="info-strip">
+                <span class="info-chip">One-time enrollment</span>
+                <span class="info-chip">Use stable lighting</span>
+                <span class="info-chip">Keep only one face visible</span>
+            </div>
+        </section>
+    </div>
+    <div class="col-lg-7">
+        <section class="media-panel h-100 text-center">
+            <video id="video" class="camera-frame" autoplay muted playsinline></video>
+            <canvas id="canvas" style="display:none;"></canvas>
+
+            <form method="post" class="mt-4">
+                {% csrf_token %}
+                <input type="hidden" name="image" id="imageData">
+                <div class="d-flex flex-column flex-md-row gap-3 justify-content-center">
+                    <button type="button" class="btn btn-outline-brand" onclick="capture()">Capture Face</button>
+                    <button type="submit" class="btn btn-brand">Save Face</button>
+                </div>
+            </form>
+        </section>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+const video = document.getElementById("video");
+const canvas = document.getElementById("canvas");
+
+navigator.mediaDevices.getUserMedia({ video: true })
+    .then(stream => {
+        video.srcObject = stream;
+    })
+    .catch(() => {
+        alert("Unable to access camera. Please allow camera permission and reload the page.");
+    });
+
+function capture() {
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    canvas.getContext("2d").drawImage(video, 0, 0);
+    document.getElementById("imageData").value = canvas.toDataURL("image/png");
+}
+</script>
+{% endblock %}

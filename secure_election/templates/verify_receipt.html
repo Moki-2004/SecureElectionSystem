@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+
+{% block title %}Verify Receipt{% endblock %}
+
+{% block content %}
+<section class="hero-panel mb-4">
+    <span class="eyebrow">Receipt Verification</span>
+    <h1 class="page-title">Check whether a vote record exists.</h1>
+    <p class="page-subtitle">
+        Enter the confirmation token you received after voting. This page only confirms that a vote record was stored.
+        It does not reveal the selected candidate.
+    </p>
+</section>
+
+<div class="row g-4">
+    <div class="col-lg-7">
+        <section class="content-panel h-100">
+            <h3 class="mb-3">Receipt Token</h3>
+            <form method="post" class="d-grid gap-3">
+                {% csrf_token %}
+                <input
+                    type="text"
+                    name="receipt_token"
+                    class="form-control"
+                    placeholder="Example: 4A8C-91FD-22BE-7C40-119E-AB12"
+                    value="{{ receipt_token|default:'' }}"
+                    autocomplete="off"
+                >
+                <button type="submit" class="btn btn-brand">Verify Vote Record</button>
+            </form>
+
+            {% if error %}
+                <div class="alert alert-danger soft-danger mt-4 mb-0">{{ error }}</div>
+            {% endif %}
+
+            {% if verified %}
+                <div class="alert soft-success mt-4 mb-0">
+                    Vote record found. The system confirms that a ballot linked to this receipt was stored on
+                    {{ recorded_at|date:"d M Y, h:i A" }}.
+                </div>
+            {% elif checked %}
+                <div class="alert alert-warning mt-4 mb-0">
+                    No vote record matched that token. Check the receipt and try again.
+                </div>
+            {% endif %}
+        </section>
+    </div>
+
+    <div class="col-lg-5">
+        <section class="content-panel h-100">
+            <h3 class="mb-3">Privacy Notes</h3>
+            <div class="d-grid gap-3">
+                <div class="status-box">
+                    The token confirms storage only. It does not identify your candidate.
+                </div>
+                <div class="status-box">
+                    The system stores a hashed version of the receipt, not the plain token.
+                </div>
+                <div class="status-box">
+                    If you lose the token, the vote remains counted, but it cannot be verified from this page.
+                </div>
+            </div>
+        </section>
+    </div>
+</div>
+{% endblock %}

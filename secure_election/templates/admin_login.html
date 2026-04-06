@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+
+{% block title %}Admin Login{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-lg-5 col-md-7">
+        <section class="content-panel">
+            <span class="eyebrow">Administrator Access</span>
+            <h1 class="page-title fs-1">Admin Login</h1>
+            <p class="page-subtitle mb-4">Sign in with a staff account to manage elections, voters, and reports.</p>
+
+            {% if error %}
+                <div class="alert alert-danger soft-danger">{{ error }}</div>
+            {% endif %}
+
+            <form method="post">
+                {% csrf_token %}
+                <div class="mb-3">
+                    <label class="form-label">Username</label>
+                    <input type="text" name="username" class="form-control" required>
+                </div>
+                <div class="mb-4">
+                    <label class="form-label">Password</label>
+                    <input type="password" name="password" class="form-control" required>
+                </div>
+                <button class="btn btn-dark w-100">Login</button>
+            </form>
+        </section>
+    </div>
+</div>
+{% endblock %}

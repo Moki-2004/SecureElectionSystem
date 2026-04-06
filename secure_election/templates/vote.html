@@ -1,0 +1,191 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Cast Vote{% endblock %}
+
+{% block extra_head %}
+<script defer src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
+{% endblock %}
+
+{% block content %}
+<section class="hero-panel mb-4">
+    <span class="eyebrow">Secure Voting Session</span>
+    <h1 class="page-title">Cast your vote with live monitoring enabled.</h1>
+    <p class="page-subtitle">Select one candidate, review your choice, and submit before the timer expires. Camera-based proctoring remains active until the ballot is submitted.</p>
+    <div class="info-strip">
+        <span class="info-chip">Time limit: {{ vote_time_limit }} seconds</span>
+        <span class="info-chip">One vote per voter</span>
+        <span class="info-chip">Proctoring active</span>
+    </div>
+</section>
+
+<div class="row g-4">
+    <div class="col-xl-8">
+        <section class="content-panel">
+            <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-4">
+                <div>
+                    <h3 class="mb-1">Choose a candidate</h3>
+                    <p class="text-muted mb-0">Only one candidate can be selected.</p>
+                </div>
+            </div>
+
+            {% if error %}
+                <div class="alert alert-danger soft-danger">{{ error }}</div>
+            {% endif %}
+
+            <form method="post" id="voteForm">
+                {% csrf_token %}
+                <div class="row g-4">
+                    {% for candidate in candidates %}
+                        <div class="col-md-6">
+                            <label class="candidate-option">
+                                <input type="radio" name="candidate" value="{{ candidate.id }}" required>
+                                <div class="candidate-card">
+                                    {% if candidate.photo %}
+                                        <img src="{{ candidate.photo.url }}" alt="{{ candidate.name }}" class="candidate-photo mb-3">
+                                    {% endif %}
+                                    <h4 class="mb-1">{{ candidate.name }}</h4>
+                                    <p class="text-muted mb-3">{{ candidate.party }}</p>
+                                    <span class="btn btn-outline-brand w-100">Select Candidate</span>
+                                </div>
+                            </label>
+                        </div>
+                    {% empty %}
+                        <div class="col-12">
+                            <div class="alert alert-secondary">No candidates are available for the active election.</div>
+                        </div>
+                    {% endfor %}
+                </div>
+
+                {% if candidates %}
+                    <div class="mt-4 pt-2">
+                        <button type="submit" class="btn btn-brand w-100">Submit Vote</button>
+                    </div>
+                {% endif %}
+            </form>
+        </section>
+    </div>
+
+    <div class="col-xl-4">
+        <section class="media-panel mb-4">
+            <h3 class="mb-3">Live Proctoring</h3>
+            <video id="proctorVideo" autoplay muted playsinline class="camera-frame mb-3"></video>
+            <div id="proctorStatus" class="status-box">
+                Proctoring active. Keep your face visible.
+            </div>
+        </section>
+
+        <section class="content-panel">
+            <h3 class="mb-3">Voting Timer</h3>
+            <div id="timer" class="status-box">
+                Time remaining: <strong><span id="timeLeft">{{ vote_time_limit }}</span> seconds</strong>
+            </div>
+        </section>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.addEventListener("DOMContentLoaded", async function () {
+    const video = document.getElementById("proctorVideo");
+    const statusBox = document.getElementById("proctorStatus");
+    const timeLeft = document.getElementById("timeLeft");
+    const csrfInput = document.querySelector("input[name='csrfmiddlewaretoken']");
+    const csrfToken = csrfInput ? csrfInput.value : "";
+
+    const startTime = Date.now();
+    const maxTime = Number("{{ vote_time_limit|default:120 }}");
+    let blocked = false;
+
+    function setStatus(message, level) {
+        statusBox.className = "status-box";
+        statusBox.innerHTML = "<strong>" + level + ":</strong> " + message;
+    }
+
+    async function triggerViolation(type) {
+        if (blocked) {
+            return;
+        }
+
+        try {
+            const res = await fetch("/log-violation/", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/x-www-form-urlencoded",
+                    "X-CSRFToken": csrfToken
+                },
+                body: new URLSearchParams({ type })
+            });
+            const data = await res.json();
+
+            if (data.action === "WARN") {
+                setStatus(type.replace(/_/g, " ").toLowerCase(), "Warning");
+            } else if (data.action === "BLOCK") {
+                blocked = true;
+                alert("Voting blocked due to proctoring violations.");
+                window.location.href = "/";
+            }
+        } catch (err) {
+            setStatus("proctoring sync error. Check network or camera access.", "Error");
+        }
+    }
+
+    try {
+        const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+        video.srcObject = stream;
+    } catch (err) {
+        await triggerViolation("CAMERA_OFF");
+        return;
+    }
+
+    try {
+        await Promise.all([
+            faceapi.nets.tinyFaceDetector.loadFromUri("{% static 'models' %}"),
+            faceapi.nets.faceLandmark68Net.loadFromUri("{% static 'models' %}"),
+            faceapi.nets.faceRecognitionNet.loadFromUri("{% static 'models' %}")
+        ]);
+    } catch (err) {
+        setStatus("proctoring model load failed.", "Error");
+    }
+
+    setInterval(async () => {
+        const elapsed = Math.floor((Date.now() - startTime) / 1000);
+        const remaining = Math.max(0, maxTime - elapsed);
+        timeLeft.textContent = String(remaining);
+
+        if (remaining === 0) {
+            await triggerViolation("TIME_EXCEEDED");
+        }
+    }, 1000);
+
+    setInterval(async () => {
+        if (blocked) {
+            return;
+        }
+
+        if (!video.srcObject || video.videoWidth === 0) {
+            await triggerViolation("CAMERA_OFF");
+            return;
+        }
+
+        try {
+            const detections = await faceapi.detectAllFaces(
+                video,
+                new faceapi.TinyFaceDetectorOptions()
+            );
+
+            if (!detections || detections.length === 0) {
+                await triggerViolation("NO_FACE");
+            } else if (detections.length > 1) {
+                await triggerViolation("MULTIPLE_FACES");
+            } else {
+                setStatus("face detected. You can continue voting.", "Active");
+            }
+        } catch (err) {
+            await triggerViolation("CAMERA_OFF");
+        }
+    }, 3000);
+});
+</script>
+{% endblock %}

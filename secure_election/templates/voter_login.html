@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+
+{% block title %}Voter Login{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-lg-5 col-md-7">
+        <section class="content-panel">
+            <span class="eyebrow">Voter Access</span>
+            <h1 class="page-title fs-1">Voter Login</h1>
+            <p class="page-subtitle mb-4">Sign in to register a face image or continue to the secure voting process.</p>
+
+            {% if error %}
+                <div class="alert alert-danger soft-danger">{{ error }}</div>
+            {% endif %}
+
+            <form method="post">
+                {% csrf_token %}
+                <div class="mb-3">
+                    <label class="form-label">Username</label>
+                    <input class="form-control" name="username" required>
+                </div>
+                <div class="mb-4">
+                    <label class="form-label">Password</label>
+                    <input class="form-control" type="password" name="password" required>
+                </div>
+                <button class="btn btn-brand w-100">Login</button>
+            </form>
+        </section>
+    </div>
+</div>
+{% endblock %}
