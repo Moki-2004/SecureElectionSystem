@@ -14,6 +14,10 @@ from users.models import Voter
 
 from .models import Vote
 
+VOTING_ELECTION_SESSION_KEY = 'voting_election_id'
+RESULTS_ELECTION_SESSION_KEY = 'results_election_id'
+INELIGIBLE_POPUP_SESSION_KEY = 'show_ineligible_election_popup'
+
 
 def normalize_receipt_token(value):
     cleaned = ''.join(ch for ch in str(value).upper() if ch.isalnum())
@@ -30,8 +34,36 @@ def generate_receipt_token():
     return '-'.join(raw[index:index + 4] for index in range(0, len(raw), 4))
 
 
-def build_results_summary():
-    votes = Vote.objects.select_related('candidate').all()
+def get_selected_election(request, session_key, *, read_get=True):
+    if read_get and 'election_id' in request.GET:
+        election_id = request.GET.get('election_id')
+        if not election_id:
+            request.session.pop(session_key, None)
+            return None
+
+        election = Election.objects.filter(id=election_id).first()
+        if election:
+            request.session[session_key] = election.id
+            return election
+
+    election_id = request.session.get(session_key)
+    if election_id:
+        return Election.objects.filter(id=election_id).first()
+
+    return None
+
+
+def build_results_summary(election=None):
+    if election is None:
+        return {
+            'results': [],
+            'winner': None,
+            'is_tie': False,
+            'tied_candidates': [],
+            'total_votes': 0,
+        }
+
+    votes = Vote.objects.select_related('candidate').filter(election=election)
     decrypted_ids = []
 
     for vote in votes:
@@ -55,7 +87,7 @@ def build_results_summary():
     if sorted_counts:
         top_vote_total = sorted_counts[0][1]
         top_ids = [cid for cid, total in sorted_counts if total == top_vote_total]
-        top_candidates = list(Candidate.objects.filter(id__in=top_ids).order_by('id'))
+        top_candidates = list(Candidate.objects.filter(id__in=top_ids, election=election).order_by('id'))
 
         if len(top_candidates) == 1:
             winner = top_candidates[0].name
@@ -65,7 +97,7 @@ def build_results_summary():
             winner = 'Tie'
 
     for cid, total in sorted_counts:
-        candidate = Candidate.objects.filter(id=cid).first()
+        candidate = Candidate.objects.filter(id=cid, election=election).first()
         if candidate:
             results.append({
                 'candidate_id': candidate.id,
@@ -87,31 +119,65 @@ def build_results_summary():
 def vote_entry(request):
     """
     Entry gate for voting.
-    Ensures face is registered and redirects to face authentication.
+    Ensures election selection and face authentication before ballot display.
     """
     try:
         voter = Voter.objects.get(user=request.user)
     except Voter.DoesNotExist:
         return redirect('/voter-login/')
 
-    if not voter.face_image:
-        return render(request, 'message.html', {
-            'msg': 'Face not registered. Please complete face registration first.'
-        })
+    now = timezone.now()
+    elections = Election.objects.filter(
+        is_active=True,
+        start_time__lte=now,
+        end_time__gte=now,
+    ).order_by('start_time')
+    eligible_elections = [
+        election for election in elections
+        if election.is_voter_eligible(voter)
+    ]
 
-    if voter.has_voted or Vote.objects.filter(voter=voter).exists():
-        return render(request, 'message.html', {
-            'msg': 'You have already voted.'
-        })
+    error = None
+    selected_election = None
+    show_ineligible_popup = False
 
-    return redirect('/face-auth/')
+    if request.method == 'POST':
+        election_id = request.POST.get('election_id')
+
+        if not election_id:
+            error = 'Please select an election.'
+        else:
+            selected_election = Election.objects.filter(
+                id=election_id,
+                is_active=True,
+                start_time__lte=now,
+                end_time__gte=now,
+            ).first()
+            if not selected_election:
+                error = 'Selected election is not active.'
+            elif not selected_election.is_voter_eligible(voter):
+                selected_election = None
+                error = 'You are not eligible for this election.'
+                show_ineligible_popup = True
+
+        if selected_election:
+            request.session[VOTING_ELECTION_SESSION_KEY] = selected_election.id
+            request.session.pop('face_verified', None)
+            if not voter.face_image:
+                return redirect('/face-register/')
+            return redirect('/face-auth/')
+
+    return render(request, 'select_election.html', {
+        'elections': eligible_elections,
+        'error': error,
+        'show_ineligible_popup': show_ineligible_popup,
+    })
 
 
 @login_required(login_url='/voter-login/')
 def vote_page(request):
     """
-    Displays candidates and records vote.
-    Requires successful face authentication.
+    Displays candidates and records vote for the explicitly selected election.
     """
     try:
         voter = Voter.objects.get(user=request.user)
@@ -121,33 +187,51 @@ def vote_page(request):
     if not request.session.get('face_verified'):
         return redirect('/face-auth/')
 
-    if voter.has_voted or Vote.objects.filter(voter=voter).exists():
-        return render(request, 'message.html', {
-            'msg': 'You have already voted.'
-        })
-
-    now = timezone.now()
-    election = Election.objects.filter(
-        is_active=True,
-        start_time__lte=now,
-        end_time__gte=now,
-    ).first()
+    election = get_selected_election(
+        request,
+        VOTING_ELECTION_SESSION_KEY,
+        read_get=False,
+    )
 
     if not election:
+        return redirect('/vote-entry/')
+
+    now = timezone.now()
+    if not (election.is_active and election.start_time <= now <= election.end_time):
         return render(request, 'message.html', {
-            'msg': 'No active election at the moment.'
+            'msg': 'Selected election is not currently accepting votes.'
+        })
+
+    already_voted = Vote.objects.filter(voter=voter, election=election).exists()
+    if already_voted:
+        return render(request, 'message.html', {
+            'msg': 'You have already voted in this election.'
         })
 
     candidates = Candidate.objects.filter(election=election)
+    is_eligible = election.is_voter_eligible(voter)
+    show_ineligible_popup = request.session.pop(INELIGIBLE_POPUP_SESSION_KEY, False)
 
-    if request.method == "POST":
+    if request.method == 'POST':
+        if not is_eligible:
+            return render(request, 'vote.html', {
+                'candidates': candidates,
+                'vote_time_limit': election.vote_time_limit,
+                'election_name': election.name,
+                'eligible': False,
+                'error': 'You are not eligible for this election.',
+                'show_ineligible_popup': True,
+            })
+
         candidate_id = request.POST.get('candidate')
 
         if not candidate_id:
             return render(request, 'vote.html', {
                 'candidates': candidates,
                 'vote_time_limit': election.vote_time_limit,
-                'error': 'Please select a candidate.'
+                'election_name': election.name,
+                'eligible': is_eligible,
+                'error': 'Please select a candidate.',
             })
 
         try:
@@ -156,25 +240,26 @@ def vote_page(request):
             return render(request, 'vote.html', {
                 'candidates': candidates,
                 'vote_time_limit': election.vote_time_limit,
-                'error': 'Invalid candidate selected.'
+                'election_name': election.name,
+                'eligible': is_eligible,
+                'error': 'Invalid candidate selected.',
             })
 
         with transaction.atomic():
             voter = Voter.objects.select_for_update().get(pk=voter.pk)
-            if voter.has_voted or Vote.objects.filter(voter=voter).exists():
+            if Vote.objects.filter(voter=voter, election=election).exists():
                 return render(request, 'message.html', {
-                    'msg': 'You have already voted.'
+                    'msg': 'You have already voted in this election.'
                 })
 
             receipt_token = generate_receipt_token()
             Vote.objects.create(
                 voter=voter,
+                election=election,
                 candidate=candidate,
                 encrypted_candidate=encrypt_vote(str(candidate.id)),
                 receipt_hash=hash_receipt_token(receipt_token),
             )
-            voter.has_voted = True
-            voter.save(update_fields=['has_voted'])
 
         request.session.pop('face_verified', None)
 
@@ -183,19 +268,34 @@ def vote_page(request):
             'election_name': election.name,
         })
 
+    if not is_eligible:
+        show_ineligible_popup = True
+
     return render(request, 'vote.html', {
         'candidates': candidates,
         'vote_time_limit': election.vote_time_limit,
+        'election_name': election.name,
+        'eligible': is_eligible,
+        'show_ineligible_popup': show_ineligible_popup,
     })
 
 
 def public_results(request):
-    summary = build_results_summary()
-    return render(request, 'results.html', summary)
+    selected_election = get_selected_election(request, RESULTS_ELECTION_SESSION_KEY)
+    elections = Election.objects.order_by('-start_time')
+    summary = build_results_summary(selected_election)
+
+    context = {
+        'elections': elections,
+        'selected_election': selected_election,
+        **summary,
+    }
+    return render(request, 'results.html', context)
 
 
 def public_results_data(request):
-    return JsonResponse(build_results_summary())
+    selected_election = get_selected_election(request, RESULTS_ELECTION_SESSION_KEY)
+    return JsonResponse(build_results_summary(selected_election))
 
 
 def verify_receipt(request):

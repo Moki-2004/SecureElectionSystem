@@ -110,7 +110,7 @@ def _resolve_report_election(rows):
     if election_id:
         return Election.objects.filter(id=election_id).first()
 
-    return Election.objects.filter(is_active=True).order_by('start_time').first()
+    return None
 
 
 def _request_username(request):

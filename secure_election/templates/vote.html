@@ -13,8 +13,9 @@
     <h1 class="page-title">Cast your vote with live monitoring enabled.</h1>
     <p class="page-subtitle">Select one candidate, review your choice, and submit before the timer expires. Camera-based proctoring remains active until the ballot is submitted.</p>
     <div class="info-strip">
+        <span class="info-chip">Election: {{ election_name }}</span>
         <span class="info-chip">Time limit: {{ vote_time_limit }} seconds</span>
-        <span class="info-chip">One vote per voter</span>
+        <span class="info-chip">One vote per voter per election</span>
         <span class="info-chip">Proctoring active</span>
     </div>
 </section>
@@ -33,36 +34,46 @@
                 <div class="alert alert-danger soft-danger">{{ error }}</div>
             {% endif %}
 
-            <form method="post" id="voteForm">
-                {% csrf_token %}
-                <div class="row g-4">
-                    {% for candidate in candidates %}
-                        <div class="col-md-6">
-                            <label class="candidate-option">
-                                <input type="radio" name="candidate" value="{{ candidate.id }}" required>
-                                <div class="candidate-card">
-                                    {% if candidate.photo %}
-                                        <img src="{{ candidate.photo.url }}" alt="{{ candidate.name }}" class="candidate-photo mb-3">
-                                    {% endif %}
-                                    <h4 class="mb-1">{{ candidate.name }}</h4>
-                                    <p class="text-muted mb-3">{{ candidate.party }}</p>
-                                    <span class="btn btn-outline-brand w-100">Select Candidate</span>
-                                </div>
-                            </label>
-                        </div>
-                    {% empty %}
-                        <div class="col-12">
-                            <div class="alert alert-secondary">No candidates are available for the active election.</div>
-                        </div>
-                    {% endfor %}
-                </div>
+            {% if eligible is not None and not eligible %}
+                <div class="alert alert-warning soft-warning">You are not eligible for this election.</div>
+            {% endif %}
 
-                {% if candidates %}
-                    <div class="mt-4 pt-2">
-                        <button type="submit" class="btn btn-brand w-100">Submit Vote</button>
+            {% if eligible %}
+                <form method="post" id="voteForm">
+                    {% csrf_token %}
+                    <div class="row g-4">
+                        {% for candidate in candidates %}
+                            <div class="col-md-6">
+                                <label class="candidate-option">
+                                    <input type="radio" name="candidate" value="{{ candidate.id }}" required>
+                                    <div class="candidate-card">
+                                        {% if candidate.photo %}
+                                            <img src="{{ candidate.photo.url }}" alt="{{ candidate.name }}" class="candidate-photo mb-3">
+                                        {% endif %}
+                                        <h4 class="mb-1">{{ candidate.name }}</h4>
+                                        <p class="text-muted mb-3">{{ candidate.party }}</p>
+                                        <span class="btn btn-outline-brand w-100">Select Candidate</span>
+                                    </div>
+                                </label>
+                            </div>
+                        {% empty %}
+                            <div class="col-12">
+                                <div class="alert alert-secondary">No candidates are available for the active election.</div>
+                            </div>
+                        {% endfor %}
                     </div>
-                {% endif %}
-            </form>
+
+                    {% if candidates %}
+                        <div class="mt-4 pt-2">
+                            <button type="submit" class="btn btn-brand w-100">Submit Vote</button>
+                        </div>
+                    {% endif %}
+                </form>
+            {% else %}
+                <div class="mt-4 pt-2">
+                    <a href="/vote-entry/" class="btn btn-secondary w-100">Choose another election</a>
+                </div>
+            {% endif %}
         </section>
     </div>
 
@@ -186,6 +197,10 @@ document.addEventListener("DOMContentLoaded", async function () {
             await triggerViolation("CAMERA_OFF");
         }
     }, 3000);
+
+    {% if show_ineligible_popup %}
+        alert('You are not eligible for this election');
+    {% endif %}
 });
 </script>
 {% endblock %}

@@ -11,9 +11,20 @@ class Election(models.Model):
         default=120,
         help_text="Voting time limit in seconds"
     )
+    eligible_voters = models.ManyToManyField(
+        'users.Voter',
+        blank=True,
+        related_name='eligible_elections',
+        help_text='If set, only these voters may vote in the election.'
+    )
 
     def __str__(self):
         return self.name
+
+    def is_voter_eligible(self, voter):
+        if not self.eligible_voters.exists():
+            return True
+        return self.eligible_voters.filter(pk=voter.pk).exists()
 
 class Candidate(models.Model):
     election = models.ForeignKey(Election, on_delete=models.CASCADE)

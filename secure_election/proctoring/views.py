@@ -1,8 +1,6 @@
 import base64
 import os
 import tempfile
-
-import face_recognition
 from django.contrib.auth.decorators import login_required
 from django.core.files.base import ContentFile
 from django.http import JsonResponse
@@ -10,6 +8,7 @@ from django.shortcuts import redirect, render
 from django.views.decorators.http import require_POST
 
 from users.models import Voter
+from voting.views import VOTING_ELECTION_SESSION_KEY
 
 from .models import ProctoringLog, ProctoringRule
 
@@ -26,9 +25,9 @@ def face_register(request):
         return redirect('/voter-login/')
 
     if voter.face_image:
-        return render(request, 'message.html', {
-            'msg': 'Face already registered. You can proceed to voting.'
-        })
+        if request.session.get(VOTING_ELECTION_SESSION_KEY):
+            return redirect('/face-auth/')
+        return redirect('/vote-entry/')
 
     if request.method == "POST":
         image_data = request.POST.get('image')
@@ -48,9 +47,10 @@ def face_register(request):
             voter.face_image.save(f"{voter.voter_id}.png", image_file)
             voter.save(update_fields=['face_image'])
 
-            return render(request, 'message.html', {
-                'msg': 'Face registration successful. You can now vote.'
-            })
+            if request.session.get(VOTING_ELECTION_SESSION_KEY):
+                return redirect('/face-auth/')
+
+            return redirect('/vote-entry/')
         except Exception:
             return render(request, 'face_register.html', {
                 'error': 'Face registration failed. Please retry.'
@@ -70,10 +70,11 @@ def face_authenticate(request):
     except Voter.DoesNotExist:
         return redirect('/voter-login/')
 
+    if not request.session.get(VOTING_ELECTION_SESSION_KEY):
+        return redirect('/vote-entry/')
+
     if not voter.face_image:
-        return render(request, 'message.html', {
-            'msg': 'Face not registered. Please register your face first.'
-        })
+        return redirect('/face-register/')
 
     if request.method == "POST":
         image_data = request.POST.get('image')
@@ -90,6 +91,8 @@ def face_authenticate(request):
             with tempfile.NamedTemporaryFile(delete=False, suffix='.png') as temp_file:
                 temp_file.write(base64.b64decode(encoded))
                 temp_path = temp_file.name
+
+            import face_recognition
 
             registered_img = face_recognition.load_image_file(voter.face_image.path)
             live_img = face_recognition.load_image_file(temp_path)

@@ -110,6 +110,22 @@
     <h1 class="page-title fs-1">Election Results</h1>
     <p class="page-subtitle">Live decrypted totals are shown below based on recorded ballots. The chart refreshes automatically.</p>
 
+    <div class="mb-4">
+        <label class="form-label">Election</label>
+        <select class="form-select" id="election-select" onchange="location.search='?election_id=' + this.value">
+            <option value="">Select election</option>
+            {% for election in elections %}
+                <option value="{{ election.id }}" {% if selected_election and selected_election.id == election.id %}selected{% endif %}>
+                    {{ election.name }}
+                </option>
+            {% endfor %}
+        </select>
+    </div>
+
+    {% if not selected_election %}
+        <div class="alert alert-secondary mb-4">Choose an election to view results for that election only. Results are not shown until an election is selected.</div>
+    {% endif %}
+
     <div class="results-meta">
         <div class="meta-card">
             <span class="meta-label">Total Votes</span>
@@ -150,7 +166,8 @@
     const totalVotesEl = document.getElementById('total-votes');
     const winnerNameEl = document.getElementById('winner-name');
     const winnerDetailEl = document.getElementById('winner-detail');
-    const dataUrl = '/results/data/';
+    const selectedElectionId = '{% if selected_election %}{{ selected_election.id }}{% endif %}';
+    const dataUrl = `/results/data/?election_id=${selectedElectionId}`;
 
     function pluralizeVotes(count) {
         return count === 1 ? 'vote' : 'votes';

@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+
+{% block title %}Select Election{% endblock %}
+
+{% block content %}
+<section class="content-panel">
+    <span class="eyebrow">Choose Election</span>
+    <h1 class="page-title">Select the election you want to vote in.</h1>
+    <p class="page-subtitle">Pick an active election before you proceed to face authentication and the ballot.</p>
+
+    {% if error %}
+        <div class="alert alert-danger soft-danger">{{ error }}</div>
+    {% endif %}
+
+    {% if elections %}
+        <form method="post" class="mt-4">
+            {% csrf_token %}
+            <div class="mb-4">
+                <label class="form-label" for="election_id">Active election</label>
+                <select id="election_id" name="election_id" class="form-select" required>
+                    <option value="">Select an election</option>
+                    {% for election in elections %}
+                        <option value="{{ election.id }}">{{ election.name }} ({{ election.start_time|date:"SHORT_DATETIME_FORMAT" }} - {{ election.end_time|date:"SHORT_DATETIME_FORMAT" }})</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <button type="submit" class="btn btn-brand">Continue</button>
+        </form>
+    {% else %}
+        <div class="alert alert-secondary mt-4">No active elections are available right now. Please check back later.</div>
+    {% endif %}
+</section>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+    {% if show_ineligible_popup %}
+        alert('You are not eligible for this election');
+    {% endif %}
+});
+</script>
+{% endblock %}
